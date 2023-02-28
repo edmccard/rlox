@@ -1,0 +1,31 @@
+[package]
+name = "rlox"
+version = "0.1.0"
+edition = "2021"
+
+[[bin]]
+name = "rlox"
+path = "src/main.rs"
+bench = false
+
+[lib]
+name = "rlox"
+path = "src/lib.rs"
+bench = false
+
+[[example]]
+name = "scanbench"
+path = "examples/scanbench.rs"
+required-features = ["bench_mode"]
+
+[dependencies]
+anyhow = "1.0.69"
+num_enum = "0.5.9"
+thiserror = "1.0.38"
+
+[features]
+trace_execution = []
+bench_mode = []
+
+[profile.release]
+codegen-units = 1

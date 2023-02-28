@@ -1,0 +1,243 @@
+use num_enum::FromPrimitive;
+use std::fmt;
+
+type Bytecode = u16;
+pub type Value = f64;
+
+#[derive(
+    Copy,
+    Clone,
+    Debug,
+    Eq,
+    PartialEq,
+    Ord,
+    PartialOrd,
+    FromPrimitive,
+    num_enum::Default
+)]
+#[repr(u8)]
+pub enum Op {
+    #[num_enum(default)]
+    Unknown,
+    Return,
+    Negate,
+    Add,
+    Subtract,
+    Multiply,
+    Divide,
+    Constant,
+    Extend,
+}
+
+impl fmt::Display for Op {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", format!("OP_{self:?}").to_ascii_uppercase())
+    }
+}
+
+#[derive(Copy, Clone)]
+pub struct Instruction {
+    opcode: Op,
+    operand: u32,
+    len: usize,
+}
+
+impl Instruction {
+    pub fn len(&self) -> usize {
+        self.len
+    }
+
+    pub fn opcode(&self) -> Op {
+        self.opcode
+    }
+
+    pub fn operand(&self) -> u32 {
+        self.operand
+    }
+}
+
+impl Default for Instruction {
+    fn default() -> Self {
+        Instruction {
+            opcode: Op::default(),
+            operand: 0,
+            len: 1,
+        }
+    }
+}
+
+pub struct Chunk {
+    code: Vec<Bytecode>,
+    constants: Vec<Value>,
+    line_map: LineMap,
+}
+
+impl Default for Chunk {
+    fn default() -> Self {
+        Chunk::new()
+    }
+}
+
+impl Chunk {
+    pub fn new() -> Self {
+        Chunk {
+            code: Vec::new(),
+            constants: Vec::new(),
+            line_map: LineMap::new(),
+        }
+    }
+
+    pub fn instructions(&self, offset: usize) -> InstIter {
+        InstIter {
+            chunk: self,
+            offset,
+        }
+    }
+
+    fn get_instruction(&self, offset: usize) -> Instruction {
+        assert!(offset < self.code.len());
+        let mut inst = Instruction::default();
+        let mut idx = offset;
+        loop {
+            let bytes = self.code[idx].to_be_bytes();
+            inst.opcode = Op::from_primitive(bytes[0]);
+            inst.operand |= bytes[1] as u32;
+            if inst.opcode != Op::Extend {
+                break;
+            }
+            idx += 1;
+            inst.operand <<= 8;
+            inst.len += 1;
+        }
+        inst
+    }
+
+    fn new_line(&mut self, line: u32) {
+        self.line_map.new_line(line);
+    }
+
+    fn push_op(&mut self, op: Op, arg: u8) {
+        let code = u16::from_be_bytes([op as u8, arg]);
+        self.code.push(code);
+        self.line_map.add_op();
+    }
+
+    fn write_op(&mut self, op: Op) {
+        assert!(op < Op::Constant);
+        self.push_op(op, 0);
+    }
+
+    fn write_op_arg(&mut self, op: Op, arg: u32) {
+        assert!(op >= Op::Constant);
+        if arg > 0xff {
+            let ext_arg = arg >> 8;
+            let start = 3 - (32 - (ext_arg.leading_zeros() as usize)) / 8;
+            for byte in &ext_arg.to_be_bytes()[start..] {
+                self.push_op(Op::Extend, *byte);
+            }
+        }
+        self.push_op(op, arg as u8);
+    }
+
+    fn add_constant(&mut self, value: Value) -> u32 {
+        assert!(self.constants.len() <= u32::MAX as usize);
+        let idx = self.constants.len() as u32;
+        self.constants.push(value);
+        idx
+    }
+
+    pub fn get_line(&self, offset: usize) -> u32 {
+        self.line_map.get_line(offset)
+    }
+
+    pub fn get_constant(&self, idx: u32) -> Value {
+        self.constants[idx as usize]
+    }
+}
+
+pub struct InstIter<'a> {
+    chunk: &'a Chunk,
+    pub(super) offset: usize,
+}
+
+impl<'a> Iterator for InstIter<'a> {
+    type Item = Instruction;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.offset >= self.chunk.code.len() {
+            return None;
+        }
+        let inst = self.chunk.get_instruction(self.offset);
+        self.offset += inst.len;
+        Some(inst)
+    }
+}
+
+struct LineMap {
+    lines: Vec<u32>,
+    current_line: u32,
+}
+
+impl Default for LineMap {
+    fn default() -> Self {
+        LineMap::new()
+    }
+}
+
+impl LineMap {
+    fn new() -> Self {
+        LineMap {
+            lines: Vec::new(),
+            current_line: 0,
+        }
+    }
+
+    fn new_line(&mut self, line: u32) {
+        self.current_line = line;
+    }
+
+    fn add_op(&mut self) {
+        self.lines.push(self.current_line);
+    }
+
+    fn get_line(&self, offset: usize) -> u32 {
+        self.lines[offset]
+    }
+}
+
+#[cfg(debug_assertions)]
+impl Chunk {
+    pub fn disassemble(&self, name: &str) {
+        println!("== {name} ==");
+        let mut offset = 0;
+        for inst in self.instructions(offset) {
+            print!("{:4} ", self.get_line(offset));
+            self.disassemble_instruction(inst, offset);
+            offset += inst.len;
+        }
+    }
+
+    pub fn disassemble_instruction(&self, inst: Instruction, offset: usize) {
+        print!("{:04} ", offset);
+        match inst.opcode {
+            op if op < Op::Constant => {
+                println!("{}", op);
+            }
+            Op::Constant => {
+                self.disassemble_const(inst.operand);
+            }
+            _ => {
+                println!("Unknown opcode {}", inst.opcode as u8);
+            }
+        }
+    }
+
+    fn disassemble_const(&self, arg: u32) {
+        print!("{:10} {:08} ", format!("{}", Op::Constant), arg);
+        if arg as usize >= self.constants.len() {
+            println!("(out of range)");
+        } else {
+            println!("{}", self.constants[arg as usize]);
+        }
+    }
+}
