@@ -1,5 +1,8 @@
+use anyhow::bail;
 use num_enum::FromPrimitive;
 use std::fmt;
+
+use crate::Result;
 
 type Bytecode = u16;
 pub type Value = f64;
@@ -79,6 +82,8 @@ impl Default for Chunk {
 }
 
 impl Chunk {
+    const MAX_CONSTS: usize = 0xffffff;
+
     pub fn new() -> Self {
         Chunk {
             code: Vec::new(),
@@ -87,10 +92,10 @@ impl Chunk {
         }
     }
 
-    pub fn instructions(&self, offset: usize) -> InstIter {
+    pub fn instructions(&self) -> InstIter {
         InstIter {
             chunk: self,
-            offset,
+            offset: 0,
         }
     }
 
@@ -112,7 +117,7 @@ impl Chunk {
         inst
     }
 
-    fn new_line(&mut self, line: u32) {
+    pub fn new_line(&mut self, line: u32) {
         self.line_map.new_line(line);
     }
 
@@ -122,12 +127,12 @@ impl Chunk {
         self.line_map.add_op();
     }
 
-    fn write_op(&mut self, op: Op) {
+    pub fn write_op(&mut self, op: Op) {
         assert!(op < Op::Constant);
         self.push_op(op, 0);
     }
 
-    fn write_op_arg(&mut self, op: Op, arg: u32) {
+    pub fn write_op_arg(&mut self, op: Op, arg: u32) {
         assert!(op >= Op::Constant);
         if arg > 0xff {
             let ext_arg = arg >> 8;
@@ -139,11 +144,13 @@ impl Chunk {
         self.push_op(op, arg as u8);
     }
 
-    fn add_constant(&mut self, value: Value) -> u32 {
-        assert!(self.constants.len() <= u32::MAX as usize);
-        let idx = self.constants.len() as u32;
+    pub fn add_constant(&mut self, value: Value) -> Result<u32> {
+        let idx = self.constants.len();
+        if idx > Chunk::MAX_CONSTS {
+            bail!("too many constants in one chunk")
+        }
         self.constants.push(value);
-        idx
+        Ok(idx as u32)
     }
 
     pub fn get_line(&self, offset: usize) -> u32 {
@@ -188,7 +195,7 @@ impl LineMap {
     fn new() -> Self {
         LineMap {
             lines: Vec::new(),
-            current_line: 0,
+            current_line: 1,
         }
     }
 
@@ -210,7 +217,7 @@ impl Chunk {
     pub fn disassemble(&self, name: &str) {
         println!("== {name} ==");
         let mut offset = 0;
-        for inst in self.instructions(offset) {
+        for inst in self.instructions() {
             print!("{:4} ", self.get_line(offset));
             self.disassemble_instruction(inst, offset);
             offset += inst.len;

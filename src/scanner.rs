@@ -53,7 +53,7 @@ impl fmt::Display for TokenType {
     }
 }
 
-#[derive(Copy, Clone, Default)]
+#[derive(Copy, Clone)]
 pub struct Token {
     ty: TokenType,
     start: usize,
@@ -80,6 +80,17 @@ impl Token {
     #[inline]
     pub fn line(&self) -> u32 {
         self.line
+    }
+}
+
+impl Default for Token {
+    fn default() -> Self {
+        Token {
+            ty: TokenType::default(),
+            start: 0,
+            end: 0,
+            line: 1,
+        }
     }
 }
 

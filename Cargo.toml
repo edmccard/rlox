@@ -25,6 +25,7 @@ thiserror = "1.0.38"
 
 [features]
 trace_execution = []
+print_code = []
 bench_mode = []
 
 [profile.release]

@@ -2,16 +2,17 @@ use std::env;
 use std::io::{stdin, stdout, BufRead, Write};
 use std::process::exit;
 
-use rlox::{Parser, Result};
+use rlox::{Parser, Result, Vm};
 
 fn main() -> Result<()> {
+    let mut vm = Vm::init();
     let args: Vec<String> = env::args().collect();
     match args.len() {
-        1 => repl()?,
+        1 => repl(&mut vm)?,
         2 => {
             let source = std::fs::read_to_string(&args[1])?;
             let mut parser = Parser::new(source);
-            parser.parse();
+            parser.parse(&mut vm);
         }
         _ => {
             eprintln!("Usage: rlox [path]");
@@ -21,7 +22,7 @@ fn main() -> Result<()> {
     Ok(())
 }
 
-fn repl() -> Result<()> {
+fn repl(vm: &mut Vm) -> Result<()> {
     let mut lines = stdin().lock().lines();
     let mut line_no = 1;
     let mut source: Vec<String> = Vec::new();
@@ -41,7 +42,7 @@ fn repl() -> Result<()> {
             source.push(line);
             let mut parser = Parser::new(source.join("\n"));
             source.clear();
-            parser.parse();
+            parser.parse(vm);
             parser.clear_error();
         }
     }

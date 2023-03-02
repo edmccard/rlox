@@ -5,21 +5,17 @@ type Result<T> = std::result::Result<T, Error>;
 
 pub struct Vm {
     stack: Vec<Value>,
-    ip: usize,
 }
 
 impl Vm {
     const MAX_STACK: usize = 1024;
 
     pub fn init() -> Self {
-        Vm {
-            ip: 0,
-            stack: Vec::new(),
-        }
+        Vm { stack: Vec::new() }
     }
 
     pub fn run(&mut self, chunk: &Chunk) -> Result<()> {
-        let mut ip = chunk.instructions(self.ip);
+        let mut ip = chunk.instructions();
         while let Some(inst) = ip.next() {
             #[cfg(feature = "trace_execution")]
             {
@@ -64,7 +60,7 @@ impl Vm {
                 e.with_line(line)
             })?;
         }
-        self.ip = ip.offset;
+
         Ok(())
     }
 

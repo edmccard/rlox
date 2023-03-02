@@ -1,10 +1,52 @@
 use anyhow::Error;
+use num_enum::UnsafeFromPrimitive;
 
+use crate::code::{Chunk, Op};
 use crate::scanner::{Scanner, Token, TokenType};
-use crate::Result;
+use crate::{Result, Vm};
+
+#[derive(
+    Copy,
+    Clone,
+    Debug,
+    Eq,
+    PartialEq,
+    Ord,
+    PartialOrd,
+    UnsafeFromPrimitive
+)]
+#[repr(u32)]
+enum Prec {
+    None,
+    Assignment,
+    Or,
+    And,
+    Equality,
+    Comparison,
+    Term,
+    Factor,
+    Unary,
+    Call,
+    Primary,
+}
+
+impl Prec {
+    fn next(self) -> Self {
+        unsafe { Prec::from_unchecked(self as u32 + 1) }
+    }
+
+    fn for_op_type(ty: TokenType) -> Self {
+        match ty {
+            TokenType::Minus | TokenType::Plus => Prec::Term,
+            TokenType::Slash | TokenType::Star => Prec::Factor,
+            _ => Prec::None,
+        }
+    }
+}
 
 pub struct Parser {
     scanner: Scanner,
+    code: Vec<Chunk>,
     current: Token,
     previous: Token,
     had_error: bool,
@@ -15,6 +57,7 @@ impl Parser {
     pub fn new(source: String) -> Parser {
         Parser {
             scanner: Scanner::new(source),
+            code: Vec::new(),
             current: Token::default(),
             previous: Token::default(),
             had_error: false,
@@ -22,8 +65,25 @@ impl Parser {
         }
     }
 
-    pub fn parse(&mut self) -> bool {
-        true
+    pub fn parse(&mut self, vm: &mut Vm) -> bool {
+        self.code.push(Chunk::new());
+
+        self.advance();
+        self.expression();
+        self.consume(TokenType::Eof, "expect end of expression");
+
+        self.emit_op(Op::Return);
+
+        let had_error = self.had_error;
+        let chunk = self.chunk();
+
+        if !had_error {
+            #[cfg(feature = "print_code")]
+            chunk.disassemble("<script>");
+            vm.run(chunk).unwrap();
+        }
+
+        !self.had_error
     }
 
     #[cfg(debug_assertions)]
@@ -70,17 +130,117 @@ impl Parser {
         Ok(())
     }
 
+    fn chunk(&mut self) -> &mut Chunk {
+        &mut self.code[0]
+    }
+
     fn advance(&mut self) {
         self.previous = self.current;
         loop {
             match self.scanner.scan_token() {
                 Ok(token) => {
                     self.current = token;
+                    let line = self.current.line();
+                    if line != self.previous.line() {
+                        self.chunk().new_line(line);
+                    }
                     break;
                 }
-                Err(e) => self.report_error(self.previous, e),
+                Err(e) => self.scan_error(e),
             }
         }
+    }
+
+    fn consume(&mut self, ty: TokenType, msg: &str) {
+        if self.current.ty() == ty {
+            self.advance();
+        } else {
+            self.error_at(self.current, msg)
+        }
+    }
+
+    fn parse_precedence(&mut self, precedence: Prec) {
+        self.advance();
+
+        match self.previous.ty() {
+            TokenType::LeftParen => self.grouping(),
+            TokenType::Minus => self.unary(),
+            TokenType::Number => self.number(),
+            _ => {
+                self.error("expect expression");
+                return;
+            }
+        }
+
+        while precedence <= Prec::for_op_type(self.current.ty()) {
+            self.advance();
+            match self.previous.ty() {
+                TokenType::Minus
+                | TokenType::Plus
+                | TokenType::Slash
+                | TokenType::Star => self.binary(),
+                _ => unreachable!(),
+            }
+        }
+    }
+
+    fn number(&mut self) {
+        let value = self
+            .scanner
+            .token_text(self.previous)
+            .parse::<f64>()
+            .unwrap();
+        self.emit_constant(value);
+    }
+
+    fn expression(&mut self) {
+        self.parse_precedence(Prec::Assignment);
+    }
+
+    fn grouping(&mut self) {
+        self.expression();
+        self.consume(TokenType::RightParen, "expect ')' after expression");
+    }
+
+    fn unary(&mut self) {
+        let operator_type = self.previous.ty();
+
+        self.parse_precedence(Prec::Unary);
+
+        match operator_type {
+            TokenType::Minus => self.emit_op(Op::Negate),
+            TokenType::Bang => (),
+            _ => unreachable!(),
+        }
+    }
+
+    fn binary(&mut self) {
+        let operator_type = self.previous.ty();
+        self.parse_precedence(Prec::for_op_type(operator_type).next());
+
+        match operator_type {
+            TokenType::Plus => self.emit_op(Op::Add),
+            TokenType::Minus => self.emit_op(Op::Subtract),
+            TokenType::Star => self.emit_op(Op::Multiply),
+            TokenType::Slash => self.emit_op(Op::Divide),
+            _ => unreachable!(),
+        }
+    }
+
+    fn emit_op(&mut self, op: Op) {
+        self.chunk().write_op(op);
+    }
+
+    fn emit_constant(&mut self, value: f64) {
+        let chunk = self.chunk();
+        let arg = match chunk.add_constant(value) {
+            Ok(idx) => idx,
+            Err(e) => {
+                self.error(&e.to_string());
+                return;
+            }
+        };
+        chunk.write_op_arg(Op::Constant, arg);
     }
 
     pub fn clear_error(&mut self) {
@@ -88,12 +248,28 @@ impl Parser {
         self.panic_mode = false;
     }
 
-    fn report_error(&mut self, token: Token, err: Error) {
+    fn scan_error(&mut self, err: Error) {
+        self.report_error(self.previous.line(), format!(": {}", err));
+    }
+
+    fn error(&mut self, msg: &str) {
+        self.error_at(self.previous, msg);
+    }
+
+    fn error_at(&mut self, token: Token, msg: &str) {
+        let msg = match token.ty() {
+            TokenType::Eof => format!(" at end: {}", msg),
+            _ => format!(" at '{}': {}", self.scanner.token_text(token), msg),
+        };
+        self.report_error(token.line(), msg);
+    }
+
+    fn report_error(&mut self, line: u32, msg: String) {
         if self.panic_mode {
             return;
         }
         self.panic_mode = true;
         self.had_error = true;
-        eprintln!("error: line {}: {}", token.line(), err);
+        eprintln!("[line {}] Error{}", line, msg);
     }
 }

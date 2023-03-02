@@ -5,6 +5,7 @@ mod vm;
 
 pub use anyhow::Result;
 pub use parser::Parser;
+pub use vm::Vm;
 
 #[derive(Debug, thiserror::Error)]
 #[error("{}", .msg)]
