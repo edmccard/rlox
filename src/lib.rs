@@ -1,3 +1,5 @@
+use std::fmt;
+
 mod code;
 mod parser;
 mod scanner;
@@ -7,20 +9,30 @@ pub use anyhow::Result;
 pub use parser::Parser;
 pub use vm::Vm;
 
-#[derive(Debug, thiserror::Error)]
-#[error("{}", .msg)]
-pub struct Error {
-    msg: String,
+#[derive(Copy, Clone, PartialEq, PartialOrd)]
+pub enum Value {
+    Nil,
+    Boolean(bool),
+    Number(f64),
 }
 
-impl Error {
-    fn new(msg: String) -> Self {
-        Error { msg }
-    }
+impl Value {
+    const TRUE: Value = Value::Boolean(true);
+    const FALSE: Value = Value::Boolean(false);
+}
 
-    fn with_line(&self, line: u32) -> Self {
-        Error {
-            msg: format!("line {}: {}", line, self.msg),
+impl fmt::Display for Value {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Value::Nil => write!(f, "nil"),
+            Value::Boolean(v) => write!(f, "{}", v),
+            Value::Number(v) => write!(f, "{}", v),
         }
+    }
+}
+
+impl From<Value> for bool {
+    fn from(value: Value) -> Self {
+        !matches!(value, Value::Nil | Value::Boolean(false))
     }
 }

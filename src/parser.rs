@@ -3,7 +3,7 @@ use num_enum::UnsafeFromPrimitive;
 
 use crate::code::{Chunk, Op};
 use crate::scanner::{Scanner, Token, TokenType};
-use crate::{Result, Vm};
+use crate::{Result, Value, Vm};
 
 #[derive(
     Copy,
@@ -39,6 +39,11 @@ impl Prec {
         match ty {
             TokenType::Minus | TokenType::Plus => Prec::Term,
             TokenType::Slash | TokenType::Star => Prec::Factor,
+            TokenType::BangEqual | TokenType::EqualEqual => Prec::Equality,
+            TokenType::Greater
+            | TokenType::GreaterEqual
+            | TokenType::Less
+            | TokenType::LessEqual => Prec::Comparison,
             _ => Prec::None,
         }
     }
@@ -164,8 +169,11 @@ impl Parser {
 
         match self.previous.ty() {
             TokenType::LeftParen => self.grouping(),
-            TokenType::Minus => self.unary(),
+            TokenType::Minus | TokenType::Bang => self.unary(),
             TokenType::Number => self.number(),
+            TokenType::Nil | TokenType::True | TokenType::False => {
+                self.literal()
+            }
             _ => {
                 self.error("expect expression");
                 return;
@@ -178,7 +186,12 @@ impl Parser {
                 TokenType::Minus
                 | TokenType::Plus
                 | TokenType::Slash
-                | TokenType::Star => self.binary(),
+                | TokenType::Star
+                | TokenType::EqualEqual
+                | TokenType::Greater
+                | TokenType::GreaterEqual
+                | TokenType::Less
+                | TokenType::LessEqual => self.binary(),
                 _ => unreachable!(),
             }
         }
@@ -191,6 +204,16 @@ impl Parser {
             .parse::<f64>()
             .unwrap();
         self.emit_constant(value);
+    }
+
+    fn literal(&mut self) {
+        let op = match self.previous.ty() {
+            TokenType::Nil => Op::Nil,
+            TokenType::True => Op::True,
+            TokenType::False => Op::False,
+            _ => unreachable!(),
+        };
+        self.emit_op(op);
     }
 
     fn expression(&mut self) {
@@ -209,7 +232,7 @@ impl Parser {
 
         match operator_type {
             TokenType::Minus => self.emit_op(Op::Negate),
-            TokenType::Bang => (),
+            TokenType::Bang => self.emit_op(Op::Not),
             _ => unreachable!(),
         }
     }
@@ -223,6 +246,21 @@ impl Parser {
             TokenType::Minus => self.emit_op(Op::Subtract),
             TokenType::Star => self.emit_op(Op::Multiply),
             TokenType::Slash => self.emit_op(Op::Divide),
+            TokenType::EqualEqual => self.emit_op(Op::Equal),
+            TokenType::Less => self.emit_op(Op::Less),
+            TokenType::Greater => self.emit_op(Op::Greater),
+            TokenType::BangEqual => {
+                self.emit_op(Op::Equal);
+                self.emit_op(Op::Not);
+            }
+            TokenType::GreaterEqual => {
+                self.emit_op(Op::Less);
+                self.emit_op(Op::Not);
+            }
+            TokenType::LessEqual => {
+                self.emit_op(Op::Greater);
+                self.emit_op(Op::Not);
+            }
             _ => unreachable!(),
         }
     }
@@ -233,7 +271,7 @@ impl Parser {
 
     fn emit_constant(&mut self, value: f64) {
         let chunk = self.chunk();
-        let arg = match chunk.add_constant(value) {
+        let arg = match chunk.add_constant(Value::Number(value)) {
             Ok(idx) => idx,
             Err(e) => {
                 self.error(&e.to_string());

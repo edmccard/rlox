@@ -2,10 +2,9 @@ use anyhow::bail;
 use num_enum::FromPrimitive;
 use std::fmt;
 
-use crate::Result;
+use crate::{Result, Value};
 
 type Bytecode = u16;
-pub type Value = f64;
 
 #[derive(
     Copy,
@@ -20,16 +19,23 @@ pub type Value = f64;
 )]
 #[repr(u8)]
 pub enum Op {
-    #[num_enum(default)]
-    Unknown,
+    Nil,
+    True,
+    False,
     Return,
+    Not,
     Negate,
+    Equal,
+    Greater,
+    Less,
     Add,
     Subtract,
     Multiply,
     Divide,
     Constant,
     Extend,
+    #[num_enum(default)]
+    Unknown,
 }
 
 impl fmt::Display for Op {

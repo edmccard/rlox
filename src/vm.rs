@@ -1,7 +1,25 @@
-use crate::code::{Chunk, Op, Value};
-use crate::Error;
+use crate::code::{Chunk, Op};
+use crate::Value;
 
-type Result<T> = std::result::Result<T, Error>;
+#[derive(Debug, thiserror::Error)]
+#[error("{}", .msg)]
+pub struct RuntimeError {
+    msg: String,
+}
+
+impl RuntimeError {
+    fn new(msg: String) -> Self {
+        RuntimeError { msg }
+    }
+
+    fn with_line(&self, line: u32) -> Self {
+        RuntimeError {
+            msg: format!("[line {}] {}", line, self.msg),
+        }
+    }
+}
+
+type Result<T> = std::result::Result<T, RuntimeError>;
 
 pub struct Vm {
     stack: Vec<Value>,
@@ -14,6 +32,10 @@ impl Vm {
         Vm { stack: Vec::new() }
     }
 
+    fn error(msg: &str) -> Result<()> {
+        Err(RuntimeError::new(msg.to_string()))
+    }
+
     pub fn run(&mut self, chunk: &Chunk) -> Result<()> {
         let mut ip = chunk.instructions();
         while let Some(inst) = ip.next() {
@@ -24,39 +46,63 @@ impl Vm {
             }
 
             let result = match inst.opcode() {
+                Op::Nil => self.push(Value::Nil),
+                Op::True => self.push(Value::TRUE),
+                Op::False => self.push(Value::FALSE),
                 Op::Return => {
                     println!("{}", self.pop());
                     break;
                 }
+                Op::Not => {
+                    let arg = bool::from(self.pop());
+                    self.push(Value::Boolean(!arg))
+                }
                 Op::Negate => {
                     let arg = self.pop();
-                    self.push(-arg)
+                    match arg {
+                        Value::Number(v) => self.push(Value::Number(-v)),
+                        _ => Vm::error("operand must be a number"),
+                    }
+                }
+                Op::Equal => {
+                    let a = self.pop();
+                    let b = self.pop();
+                    self.push(Value::Boolean(a == b))
+                }
+                Op::Greater => {
+                    let (a, b) = self.arithmetic_args()?;
+                    self.push(Value::Boolean(a > b))
+                }
+                Op::Less => {
+                    let (a, b) = self.arithmetic_args()?;
+                    self.push(Value::Boolean(a < b))
                 }
                 Op::Add => {
-                    let (a, b) = self.binary_args();
-                    self.push(a + b)
+                    let (a, b) = self.arithmetic_args()?;
+                    self.push(Value::Number(a + b))
                 }
                 Op::Subtract => {
-                    let (a, b) = self.binary_args();
-                    self.push(a - b)
+                    let (a, b) = self.arithmetic_args()?;
+                    self.push(Value::Number(a - b))
                 }
                 Op::Multiply => {
-                    let (a, b) = self.binary_args();
-                    self.push(a * b)
+                    let (a, b) = self.arithmetic_args()?;
+                    self.push(Value::Number(a * b))
                 }
                 Op::Divide => {
-                    let (a, b) = self.binary_args();
-                    self.push(a / b)
+                    let (a, b) = self.arithmetic_args()?;
+                    self.push(Value::Number(a / b))
                 }
                 Op::Constant => {
                     let constant = chunk.get_constant(inst.operand());
                     self.push(constant)
                 }
-                _ => Err(Error::new("unknown opcode".to_string())),
+                _ => Vm::error("unknown opcode"),
             };
             result.map_err(|e| {
                 let offset = ip.offset - inst.len();
                 let line = chunk.get_line(offset);
+                self.stack.clear();
                 e.with_line(line)
             })?;
         }
@@ -69,7 +115,7 @@ impl Vm {
             self.stack.push(val);
             Ok(())
         } else {
-            Err(Error::new("stack overflow".to_string()))
+            Vm::error("stack overflow")
         }
     }
 
@@ -78,10 +124,13 @@ impl Vm {
         self.stack.pop().unwrap()
     }
 
-    fn binary_args(&mut self) -> (Value, Value) {
+    fn arithmetic_args(&mut self) -> Result<(f64, f64)> {
         let b = self.pop();
         let a = self.pop();
-        (a, b)
+        match (a, b) {
+            (Value::Number(a), Value::Number(b)) => Ok((a, b)),
+            _ => Err(RuntimeError::new("operands must be numbers".to_string())),
+        }
     }
 }
 
