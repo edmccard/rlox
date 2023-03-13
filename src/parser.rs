@@ -3,17 +3,10 @@ use num_enum::UnsafeFromPrimitive;
 
 use crate::code::{Chunk, Op};
 use crate::scanner::{Scanner, Token, TokenType};
-use crate::{Result, Value, Vm};
+use crate::{Value, Vm};
 
 #[derive(
-    Copy,
-    Clone,
-    Debug,
-    Eq,
-    PartialEq,
-    Ord,
-    PartialOrd,
-    UnsafeFromPrimitive
+    Copy, Clone, Debug, Eq, PartialEq, Ord, PartialOrd, UnsafeFromPrimitive,
 )]
 #[repr(u32)]
 enum Prec {
@@ -70,7 +63,7 @@ impl Parser {
         }
     }
 
-    pub fn parse(&mut self, vm: &mut Vm) -> bool {
+    pub fn parse(&mut self, vm: &mut Vm) -> Option<Chunk> {
         self.code.push(Chunk::new());
 
         self.advance();
@@ -79,16 +72,13 @@ impl Parser {
 
         self.emit_op(Op::Return);
 
-        let had_error = self.had_error;
-        let chunk = self.chunk();
-
-        if !had_error {
-            #[cfg(feature = "print_code")]
-            chunk.disassemble("<script>");
-            vm.run(chunk).unwrap();
+        #[cfg(feature = "print_code")]
+        if !self.had_error {
+            self.chunk().disassemble("<script>");
         }
 
-        !self.had_error
+        let chunk = self.code.pop().unwrap();
+        (!self.had_error).then_some(chunk)
     }
 
     #[cfg(debug_assertions)]
@@ -171,6 +161,7 @@ impl Parser {
             TokenType::LeftParen => self.grouping(),
             TokenType::Minus | TokenType::Bang => self.unary(),
             TokenType::Number => self.number(),
+            TokenType::String => self.string(),
             TokenType::Nil | TokenType::True | TokenType::False => {
                 self.literal()
             }
@@ -203,7 +194,7 @@ impl Parser {
             .token_text(self.previous)
             .parse::<f64>()
             .unwrap();
-        self.emit_constant(value);
+        self.emit_constant(Value::Number(value));
     }
 
     fn literal(&mut self) {
@@ -214,6 +205,11 @@ impl Parser {
             _ => unreachable!(),
         };
         self.emit_op(op);
+    }
+
+    fn string(&mut self) {
+        let raw = self.scanner.token_text(self.previous);
+        self.emit_constant(Value::String(raw[1..raw.len() - 1].into()));
     }
 
     fn expression(&mut self) {
@@ -269,9 +265,9 @@ impl Parser {
         self.chunk().write_op(op);
     }
 
-    fn emit_constant(&mut self, value: f64) {
+    fn emit_constant(&mut self, value: Value) {
         let chunk = self.chunk();
-        let arg = match chunk.add_constant(Value::Number(value)) {
+        let arg = match chunk.add_constant(value) {
             Ok(idx) => idx,
             Err(e) => {
                 self.error(&e.to_string());
@@ -279,11 +275,6 @@ impl Parser {
             }
         };
         chunk.write_op_arg(Op::Constant, arg);
-    }
-
-    pub fn clear_error(&mut self) {
-        self.had_error = false;
-        self.panic_mode = false;
     }
 
     fn scan_error(&mut self, err: Error) {

@@ -2,10 +2,9 @@ use std::env;
 use std::io::{stdin, stdout, BufRead, Write};
 use std::process::exit;
 
-use rlox::{Parser, Result, Vm};
+use rlox::{Parser, Result};
 
 fn main() -> Result<()> {
-    let mut vm = Vm::init();
     let args: Vec<String> = env::args().collect();
     if args.len() != 1 {
         eprintln!("Usage: scandemo");
@@ -29,10 +28,9 @@ fn main() -> Result<()> {
             continue;
         } else {
             source.push(line);
-            let mut parser = Parser::new(source.join("\n"), &mut vm);
-            source.clear();
+            let mut parser = Parser::new(source.join("\n"));
             parser.show_tokens();
-            parser.clear_error();
+            source.clear();
         }
     }
 

@@ -10,6 +10,7 @@ fn main() -> Result<()> {
     }
     let source = std::fs::read_to_string(&args[1])?;
     let mut compiler = Parser::new(source);
+    #[cfg(feature = "bench_mode")]
     compiler.bench()?;
     Ok(())
 }

@@ -1,19 +1,21 @@
-use std::fmt;
+use std::{fmt, rc::Rc};
+
+pub use anyhow::Result;
+pub use parser::Parser;
+pub use vm::Vm;
 
 mod code;
 mod parser;
 mod scanner;
 mod vm;
 
-pub use anyhow::Result;
-pub use parser::Parser;
-pub use vm::Vm;
-
-#[derive(Copy, Clone, PartialEq, PartialOrd)]
-pub enum Value {
+#[derive(Clone, Default, PartialEq, PartialOrd)]
+pub(crate) enum Value {
+    #[default]
     Nil,
     Boolean(bool),
     Number(f64),
+    String(Rc<str>),
 }
 
 impl Value {
@@ -27,6 +29,7 @@ impl fmt::Display for Value {
             Value::Nil => write!(f, "nil"),
             Value::Boolean(v) => write!(f, "{}", v),
             Value::Number(v) => write!(f, "{}", v),
+            Value::String(v) => write!(f, "{}", v),
         }
     }
 }

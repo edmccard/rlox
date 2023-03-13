@@ -1,23 +1,6 @@
 use crate::code::{Chunk, Op};
+use crate::parser::Parser;
 use crate::Value;
-
-#[derive(Debug, thiserror::Error)]
-#[error("{}", .msg)]
-pub struct RuntimeError {
-    msg: String,
-}
-
-impl RuntimeError {
-    fn new(msg: String) -> Self {
-        RuntimeError { msg }
-    }
-
-    fn with_line(&self, line: u32) -> Self {
-        RuntimeError {
-            msg: format!("[line {}] {}", line, self.msg),
-        }
-    }
-}
 
 type Result<T> = std::result::Result<T, RuntimeError>;
 
@@ -36,7 +19,15 @@ impl Vm {
         Err(RuntimeError::new(msg.to_string()))
     }
 
-    pub fn run(&mut self, chunk: &Chunk) -> Result<()> {
+    pub fn interpret(&mut self, source: String) -> Result<()> {
+        let mut parser = Parser::new(source);
+        match parser.parse(self) {
+            Some(chunk) => self.run(&chunk),
+            None => Ok(()),
+        }
+    }
+
+    pub(crate) fn run(&mut self, chunk: &Chunk) -> Result<()> {
         let mut ip = chunk.instructions();
         while let Some(inst) = ip.next() {
             #[cfg(feature = "trace_execution")]
@@ -78,8 +69,19 @@ impl Vm {
                     self.push(Value::Boolean(a < b))
                 }
                 Op::Add => {
-                    let (a, b) = self.arithmetic_args()?;
-                    self.push(Value::Number(a + b))
+                    let b = self.pop();
+                    let a = self.pop();
+                    match (a, b) {
+                        (Value::Number(a), Value::Number(b)) => {
+                            self.push(Value::Number(a + b))
+                        }
+                        (Value::String(a), Value::String(b)) => {
+                            self.push(Value::String([a, b].concat().into()))
+                        }
+                        _ => Err(RuntimeError::new(
+                            "operands must be numbers".to_string(),
+                        )),
+                    }
                 }
                 Op::Subtract => {
                     let (a, b) = self.arithmetic_args()?;
@@ -132,15 +134,31 @@ impl Vm {
             _ => Err(RuntimeError::new("operands must be numbers".to_string())),
         }
     }
-}
 
-#[cfg(feature = "trace_execution")]
-impl Vm {
+    #[cfg(feature = "trace_execution")]
     fn trace_stack(&self) {
         print!("          ");
         for elem in &self.stack {
             print!("[ {} ]", elem);
         }
         println!();
+    }
+}
+
+#[derive(Debug, thiserror::Error)]
+#[error("{}", .msg)]
+pub struct RuntimeError {
+    msg: String,
+}
+
+impl RuntimeError {
+    fn new(msg: String) -> Self {
+        RuntimeError { msg }
+    }
+
+    fn with_line(&self, line: u32) -> Self {
+        RuntimeError {
+            msg: format!("[line {}] {}", line, self.msg),
+        }
     }
 }

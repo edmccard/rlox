@@ -15,7 +15,7 @@ type Bytecode = u16;
     Ord,
     PartialOrd,
     FromPrimitive,
-    num_enum::Default
+    num_enum::Default,
 )]
 #[repr(u8)]
 pub enum Op {
@@ -90,7 +90,7 @@ impl Default for Chunk {
 impl Chunk {
     const MAX_CONSTS: usize = 0xffffff;
 
-    pub fn new() -> Self {
+    pub(crate) fn new() -> Self {
         Chunk {
             code: Vec::new(),
             constants: Vec::new(),
@@ -123,7 +123,7 @@ impl Chunk {
         inst
     }
 
-    pub fn new_line(&mut self, line: u32) {
+    pub(crate) fn new_line(&mut self, line: u32) {
         self.line_map.new_line(line);
     }
 
@@ -133,12 +133,12 @@ impl Chunk {
         self.line_map.add_op();
     }
 
-    pub fn write_op(&mut self, op: Op) {
+    pub(crate) fn write_op(&mut self, op: Op) {
         assert!(op < Op::Constant);
         self.push_op(op, 0);
     }
 
-    pub fn write_op_arg(&mut self, op: Op, arg: u32) {
+    pub(crate) fn write_op_arg(&mut self, op: Op, arg: u32) {
         assert!(op >= Op::Constant);
         if arg > 0xff {
             let ext_arg = arg >> 8;
@@ -150,7 +150,7 @@ impl Chunk {
         self.push_op(op, arg as u8);
     }
 
-    pub fn add_constant(&mut self, value: Value) -> Result<u32> {
+    pub(crate) fn add_constant(&mut self, value: Value) -> Result<u32> {
         let idx = self.constants.len();
         if idx > Chunk::MAX_CONSTS {
             bail!("too many constants in one chunk")
@@ -159,12 +159,12 @@ impl Chunk {
         Ok(idx as u32)
     }
 
-    pub fn get_line(&self, offset: usize) -> u32 {
+    pub(crate) fn get_line(&self, offset: usize) -> u32 {
         self.line_map.get_line(offset)
     }
 
-    pub fn get_constant(&self, idx: u32) -> Value {
-        self.constants[idx as usize]
+    pub(crate) fn get_constant(&self, idx: u32) -> Value {
+        self.constants[idx as usize].clone()
     }
 }
 
