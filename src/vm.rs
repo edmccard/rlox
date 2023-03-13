@@ -1,18 +1,51 @@
+use std::cell::RefCell;
+use std::fmt;
+use std::rc::{Rc, Weak};
+
 use crate::code::{Chunk, Op};
 use crate::parser::Parser;
 use crate::Value;
 
+pub(crate) type Obj = Rc<RefCell<Object>>;
 type Result<T> = std::result::Result<T, RuntimeError>;
+
+#[derive(PartialEq, PartialOrd)]
+pub(crate) struct Object {
+    payload: Payload,
+}
+
+impl fmt::Display for Object {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        self.payload.fmt(f)
+    }
+}
+
+#[derive(PartialEq, PartialOrd)]
+enum Payload {
+    String(Box<str>),
+}
+
+impl fmt::Display for Payload {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Payload::String(v) => write!(f, "\"{}\"", v),
+        }
+    }
+}
 
 pub struct Vm {
     stack: Vec<Value>,
+    heap: Vec<Weak<RefCell<Object>>>,
 }
 
 impl Vm {
     const MAX_STACK: usize = 1024;
 
     pub fn init() -> Self {
-        Vm { stack: Vec::new() }
+        Vm {
+            stack: Vec::new(),
+            heap: Vec::new(),
+        }
     }
 
     fn error(msg: &str) -> Result<()> {
@@ -27,7 +60,7 @@ impl Vm {
         }
     }
 
-    pub(crate) fn run(&mut self, chunk: &Chunk) -> Result<()> {
+    fn run(&mut self, chunk: &Chunk) -> Result<()> {
         let mut ip = chunk.instructions();
         while let Some(inst) = ip.next() {
             #[cfg(feature = "trace_execution")]
@@ -75,11 +108,11 @@ impl Vm {
                         (Value::Number(a), Value::Number(b)) => {
                             self.push(Value::Number(a + b))
                         }
-                        (Value::String(a), Value::String(b)) => {
-                            self.push(Value::String([a, b].concat().into()))
+                        (Value::Object(a), Value::Object(b)) => {
+                            self.add_objects(a, b)
                         }
                         _ => Err(RuntimeError::new(
-                            "operands must be numbers".to_string(),
+                            "operands must be numbers or strings".to_string(),
                         )),
                     }
                 }
@@ -110,6 +143,27 @@ impl Vm {
         }
 
         Ok(())
+    }
+
+    pub(crate) fn new_string(&mut self, text: &str) -> Value {
+        let object = Object {
+            payload: Payload::String(Box::from(text)),
+        };
+        let obj = Rc::new(RefCell::new(object));
+        self.heap.push(Rc::downgrade(&obj));
+        Value::Object(obj)
+    }
+
+    fn add_objects(&mut self, a: Obj, b: Obj) -> Result<()> {
+        match (&a.borrow().payload, &b.borrow().payload) {
+            (Payload::String(a), Payload::String(b)) => {
+                let value = self.new_string(&[a.as_ref(), b.as_ref()].concat());
+                self.push(value)
+            }
+            _ => Err(RuntimeError::new(
+                "operands must be numbers or strings".to_string(),
+            )),
+        }
     }
 
     fn push(&mut self, val: Value) -> Result<()> {

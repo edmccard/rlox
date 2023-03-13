@@ -6,7 +6,14 @@ use crate::scanner::{Scanner, Token, TokenType};
 use crate::{Value, Vm};
 
 #[derive(
-    Copy, Clone, Debug, Eq, PartialEq, Ord, PartialOrd, UnsafeFromPrimitive,
+    Copy,
+    Clone,
+    Debug,
+    Eq,
+    PartialEq,
+    Ord,
+    PartialOrd,
+    UnsafeFromPrimitive
 )]
 #[repr(u32)]
 enum Prec {
@@ -67,7 +74,7 @@ impl Parser {
         self.code.push(Chunk::new());
 
         self.advance();
-        self.expression();
+        self.expression(vm);
         self.consume(TokenType::Eof, "expect end of expression");
 
         self.emit_op(Op::Return);
@@ -154,14 +161,14 @@ impl Parser {
         }
     }
 
-    fn parse_precedence(&mut self, precedence: Prec) {
+    fn parse_precedence(&mut self, precedence: Prec, vm: &mut Vm) {
         self.advance();
 
         match self.previous.ty() {
-            TokenType::LeftParen => self.grouping(),
-            TokenType::Minus | TokenType::Bang => self.unary(),
+            TokenType::LeftParen => self.grouping(vm),
+            TokenType::Minus | TokenType::Bang => self.unary(vm),
             TokenType::Number => self.number(),
-            TokenType::String => self.string(),
+            TokenType::String => self.string(vm),
             TokenType::Nil | TokenType::True | TokenType::False => {
                 self.literal()
             }
@@ -182,7 +189,7 @@ impl Parser {
                 | TokenType::Greater
                 | TokenType::GreaterEqual
                 | TokenType::Less
-                | TokenType::LessEqual => self.binary(),
+                | TokenType::LessEqual => self.binary(vm),
                 _ => unreachable!(),
             }
         }
@@ -207,24 +214,25 @@ impl Parser {
         self.emit_op(op);
     }
 
-    fn string(&mut self) {
+    fn string(&mut self, vm: &mut Vm) {
         let raw = self.scanner.token_text(self.previous);
-        self.emit_constant(Value::String(raw[1..raw.len() - 1].into()));
+        let value = vm.new_string(&raw[1..raw.len() - 1]);
+        self.emit_constant(value);
     }
 
-    fn expression(&mut self) {
-        self.parse_precedence(Prec::Assignment);
+    fn expression(&mut self, vm: &mut Vm) {
+        self.parse_precedence(Prec::Assignment, vm);
     }
 
-    fn grouping(&mut self) {
-        self.expression();
+    fn grouping(&mut self, vm: &mut Vm) {
+        self.expression(vm);
         self.consume(TokenType::RightParen, "expect ')' after expression");
     }
 
-    fn unary(&mut self) {
+    fn unary(&mut self, vm: &mut Vm) {
         let operator_type = self.previous.ty();
 
-        self.parse_precedence(Prec::Unary);
+        self.parse_precedence(Prec::Unary, vm);
 
         match operator_type {
             TokenType::Minus => self.emit_op(Op::Negate),
@@ -233,9 +241,9 @@ impl Parser {
         }
     }
 
-    fn binary(&mut self) {
+    fn binary(&mut self, vm: &mut Vm) {
         let operator_type = self.previous.ty();
-        self.parse_precedence(Prec::for_op_type(operator_type).next());
+        self.parse_precedence(Prec::for_op_type(operator_type).next(), vm);
 
         match operator_type {
             TokenType::Plus => self.emit_op(Op::Add),
